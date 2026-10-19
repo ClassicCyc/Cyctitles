@@ -21,7 +21,6 @@
 ; >>> EDIT THIS: direct download URL of cuda.zip from your GitHub Release <<<
 ; e.g. https://github.com/ClassicCyc/Cyctitles/releases/download/v1.0.0/cuda.zip
 #define CudaPackUrl "https://github.com/ClassicCyc/Cyctitles/releases/download/v1.0.0/cuda.zip"
-
 [Setup]
 AppId={{8F3B2E7A-6C4D-4A1E-9B2F-7D5C1A9E4B63}
 AppName={#MyAppName}
