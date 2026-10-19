@@ -6,6 +6,10 @@
 [![Platform: Windows](https://img.shields.io/badge/platform-Windows-0078D6.svg)](#requirements)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 
+<p align="center">
+  <img src="screenshots/about-BANNER.png" alt="Cyctitles" width="640">
+</p>
+
 Real-time **offline** subtitles **and dictation** for OBS Studio (and any Windows app).
 
 Speak into your microphone (or translate what your PC is playing), and the result
@@ -82,6 +86,28 @@ Audio (mic / loopback) → VAD (webrtcvad) → faster-whisper (GPU) → quickmt 
 - **Download progress** — model downloads show a live progress bar with MB, percentage,
   speed and time remaining.
 - **Built-in guide** — `Help → How to use Cyctitles…` walks through every feature.
+
+## Screenshots
+
+**The main window** — pick the input, the models and the output mode, then press Start:
+
+![Main window](screenshots/mainwindow.png)
+
+**Overlay on video** — the translation pops up over the picture (demo clip by CraftingVegeto):
+
+![Overlay example](screenshots/overlay_example.png)
+
+**Inside OBS** — a transparent Browser Source, with different subtitle presets:
+
+![OBS demo 1](screenshots/obs_demo1.png)
+
+![OBS demo 2](screenshots/obs_demo2.png)
+
+|  |  |
+|---|---|
+| **Manage models**<br>![Manage models](screenshots/managemodels.png) | **All available models**<br>![All models](screenshots/browseallmodels-list.png) |
+| **Settings → Subtitles**<br>![Subtitles settings](screenshots/settings_subtitles.png) | **Settings → Speech**<br>![Speech settings](screenshots/settings_speech.png) |
+| **Language list**<br>![Languages](screenshots/settings_language-list-demo.png) | **Built-in guide**<br>![How to use](screenshots/howtouse-window.png) |
 
 ## Install
 
