@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Discussions
+    url: https://github.com/ClassicCyc/Cyctitles/discussions
+    about: Ask questions and share setups with other users.
+  - name: Releases
+    url: https://github.com/ClassicCyc/Cyctitles/releases
+    about: Download the latest installer or portable build.

@@ -1,13 +1,27 @@
 # Cyctitles
 
+[![Tests](https://github.com/ClassicCyc/Cyctitles/actions/workflows/tests.yml/badge.svg)](https://github.com/ClassicCyc/Cyctitles/actions/workflows/tests.yml)
+[![Release](https://img.shields.io/github/v/release/ClassicCyc/Cyctitles)](https://github.com/ClassicCyc/Cyctitles/releases/latest)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Platform: Windows](https://img.shields.io/badge/platform-Windows-0078D6.svg)](#requirements)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
+
 Real-time **offline** subtitles **and dictation** for OBS Studio (and any Windows app).
 
 Speak into your microphone (or translate what your PC is playing), and the result
 appears as a styled subtitle overlay in OBS — or is typed straight into the focused
 window. No cloud services, no API keys, no monthly cost: transcription and translation
-run entirely on your PC after the models are downloaded once.
+run entirely on your PC after the models are downloaded once (on first use).
 
 > Made by **ClassicCyc**. Specially for **CraftingVegeto**.
+
+> **Quick links:**
+> [Install](#install) ·
+> [Requirements](#requirements) ·
+> [Quick start](#quick-start-for-the-streamer) ·
+> [Models](#models-storage--custom-models) ·
+> [Building](#building-the-executable) ·
+> [Troubleshooting](#troubleshooting)
 
 ## How it works
 
@@ -25,7 +39,8 @@ Audio (mic / loopback) → VAD (webrtcvad) → faster-whisper (GPU) → quickmt 
     transparent Browser Source (customisable font, opacity, line wrapping).
   - **Dictation** — the recognised (optionally translated) text is typed into whatever
     window is focused.
-- Everything runs locally. Models download once on first run, then it works offline.
+- Everything runs locally. Models download once on first use (when you press **Start**
+  or open **Manage models…**), then it works offline.
 
 ## Highlights
 
