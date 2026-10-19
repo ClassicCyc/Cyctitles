@@ -117,10 +117,10 @@ begin
       try
         try
           DownloadPage.Download;
-          CudaZip := DownloadPage.Files[0].Filename;
+          CudaZip := ExpandConstant('{tmp}\cuda.zip');
         except
-          SuppressibleMsgBox('Could not download the NVIDIA CUDA pack from:'#13#10 + CudaPackUrl +
-            #13#10#13#10'The app will still install and run on CPU. You can add CUDA later by ' +
+          SuppressibleMsgBox('Could not download the NVIDIA CUDA pack from:' + #13#10 + CudaPackUrl +
+            + #13#10 + #13#10 + 'The app will still install and run on CPU. You can add CUDA later by ' +
             'placing cuda.zip next to the installer and running it again, or by unpacking ' +
             'cuda.zip next to Cyctitles.exe.', mbError, MB_OK, IDOK);
         end;
