@@ -1,0 +1,130 @@
+/* Inter (latin + cyrillic subsets), self-hosted so the overlay works offline. */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/static/fonts/inter-latin-400-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/static/fonts/inter-cyrillic-400-normal.woff2") format("woff2");
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/static/fonts/inter-latin-600-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/static/fonts/inter-cyrillic-600-normal.woff2") format("woff2");
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+
+:root {
+  --opacity: 0.75;
+  --font-scale: 1;
+  --orig-scale: 0.6;
+  --max-width: 64vw;
+  --bottom: 6;
+  --max-lines: 2;
+  --text-color: #ffffff;
+  --bg-rgb: 0, 0, 0;
+  --enter-shift: 10px;
+  --outline-width: 0;
+  --outline-color: #000;
+  --font-weight: 600;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  overflow: hidden;
+  height: 100%;
+}
+
+#wrap {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+#wrap.bottom {
+  bottom: calc(var(--bottom) * 1vh);
+}
+
+#wrap.top {
+  top: calc(var(--bottom) * 1vh);
+}
+
+#box {
+  max-width: var(--max-width);
+  background: rgba(var(--bg-rgb), var(--opacity));
+  border-radius: 0.35em;
+  padding: 0.32em 0.7em;
+  opacity: 0;
+  transform: translateY(var(--enter-shift));
+  transition: opacity var(--anim-duration, 0.25s) ease, transform var(--anim-duration, 0.25s) ease;
+}
+#box.anim-slide-up { transform: translateY(10px); }
+#box.anim-slide-up.visible { transform: translateY(0); }
+#box.anim-slide-down { transform: translateY(-10px); }
+#box.anim-slide-down.visible { transform: translateY(0); }
+#box.anim-fade { transform: none; }
+
+#box.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+#box.anim-fade.visible { transform: none; }
+
+.tgt {
+  font-family: "Inter", "Segoe UI", system-ui, sans-serif;
+  font-weight: var(--font-weight, 600);
+  color: var(--text-color);
+  line-height: 1.25;
+  text-align: center;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  max-height: calc(var(--max-lines) * 1.25em);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: var(--max-lines);
+  -webkit-box-orient: vertical;
+  word-break: break-word;
+  -webkit-text-stroke: var(--outline-width, 0) var(--outline-color, #000);
+  paint-order: stroke fill;
+}
+
+.src {
+  font-family: "Inter", "Segoe UI", system-ui, sans-serif;
+  font-weight: 400;
+  color: var(--src-color, rgba(255, 255, 255, 0.72));
+  line-height: 1.25;
+  text-align: center;
+  margin-top: 0.18em;
+  max-height: 1.25em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

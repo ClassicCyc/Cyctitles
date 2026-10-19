@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+scratch/
+build/
+dist/
+*.log
+.pytest_cache/
+.sisyphus/
+
+# Installer output
+installer/Output/
+*.iss.bak

@@ -1,0 +1,52 @@
+name: Bug report
+description: Something isn't working in Cyctitles
+labels: [bug]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug and what you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open Cyctitles
+        2. ...
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Cyctitles version
+      placeholder: "e.g. 1.0.0 (see About)"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: gpu
+    attributes:
+      label: GPU
+      options:
+        - NVIDIA (CUDA)
+        - AMD
+        - Intel
+        - None / CPU only
+    validations:
+      required: false
+
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: |
+        Paste the log from `%LOCALAPPDATA%\Cyctitles\cyctitles.log`, or the output of
+        `Cyctitles.exe --selftest`.
+      render: text
+    validations:
+      required: false
