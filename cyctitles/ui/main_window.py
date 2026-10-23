@@ -139,6 +139,9 @@ class MainWindow(QMainWindow):
         open_config = QAction(tr("menu_open_config"), self)
         open_config.triggered.connect(self._open_config_folder)
         settings_menu.addAction(open_config)
+        open_log = QAction(tr("menu_open_log"), self)
+        open_log.triggered.connect(self._open_log_file)
+        settings_menu.addAction(open_log)
         open_models_dir = QAction(tr("menu_open_models"), self)
         open_models_dir.triggered.connect(self._open_models_folder)
         settings_menu.addAction(open_models_dir)
@@ -722,6 +725,13 @@ class MainWindow(QMainWindow):
 
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(CONFIG_PATH.parent)))
 
+    def _open_log_file(self) -> None:
+        from ..config import data_dir
+
+        path = data_dir() / "cyctitles.log"
+        target = path if path.exists() else path.parent
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(target)))
+
     def _open_models_folder(self) -> None:
         path = self._models_dir()
         path.mkdir(parents=True, exist_ok=True)
@@ -881,7 +891,7 @@ class MainWindow(QMainWindow):
             return False
         ok, error = run_download(infos, self._models_dir(), self)
         self._refresh_model_status()
-        if not ok:
+        if not ok and error:
             QMessageBox.warning(self, "Cyctitles", tr("msg_download_failed", err=error))
         return ok
 
@@ -1049,9 +1059,11 @@ class MainWindow(QMainWindow):
             self.pipeline.stop()
         if self.hotkey is not None:
             self.hotkey.stop()
-        self.overlay.stop()
+        if self.overlay is not None:
+            self.overlay.stop()
         if self._screen_overlay is not None:
             self._screen_overlay.close()
+        self._stop_tts()
         if self._tray is not None:
             self._tray.hide()
         super().closeEvent(event)

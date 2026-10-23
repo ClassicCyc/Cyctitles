@@ -1,16 +1,37 @@
 """Model registry: where each model comes from, its size, and whether it is
 already downloaded.
 
-Whisper models are cached by faster-whisper through huggingface_hub in the
-standard cache layout (``models--<org>--<repo>/snapshots/<rev>/``) under
+Whisper models are cached through huggingface_hub in the standard cache layout
+(``models--<org>--<repo>/snapshots/<rev>/``) under
 ``%LOCALAPPDATA%/Cyctitles/models``. The translation model is stored flat under
 ``models/quickmt-en-ru``.
 """
 
 from __future__ import annotations
 
+import os
+import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
+
+# ``progress(downloaded_bytes, total_bytes)`` — called from the download thread.
+ProgressFn = Callable[[int, int], None]
+
+
+class DownloadCancelled(Exception):
+    """Raised from the progress callback to abort an in-flight download."""
+
+
+# Xet routes downloads through a separate CAS CDN (cas-server.xethub.hf.co),
+# which is frequently blocked or extremely slow on some networks (notably RU)
+# while the main Hugging Face host works fine. The classic HTTP path uses the
+# same host as the website, so prefer it for reliable downloads. Set
+# HF_HUB_DISABLE_XET=0 to opt back in to Xet.
+os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
+
+_DEVNULL = open(os.devnull, "w", encoding="utf-8")
 
 # Hugging Face repositories, mirroring faster_whisper.utils._MODELS.
 WHISPER_REPOS: dict[str, str] = {
@@ -48,6 +69,87 @@ QUICKMT_IGNORE = [
     "*.eole.vocab",
     "*.spm.vocab",
 ]
+
+# Files faster-whisper actually needs (mirrors faster_whisper.utils.download_model).
+WHISPER_ALLOW_PATTERNS = [
+    "config.json",
+    "preprocessor_config.json",
+    "model.bin",
+    "tokenizer.json",
+    "vocabulary.*",
+]
+
+
+def progress_tqdm_class(progress: ProgressFn):
+    """Build a tqdm class that reports real byte progress from huggingface_hub.
+
+    ``faster_whisper`` forces ``tqdm_class=disabled_tqdm``, so its downloads show
+    no progress at all, and with Xet the destination folder stays empty until the
+    very end. Passing this class to ``snapshot_download`` gives us the live
+    network byte counter instead.
+    """
+
+    from tqdm.auto import tqdm as _tqdm
+
+    lock = threading.Lock()
+    bars: dict[int, tuple[int, int]] = {}
+    last = {"done": -1, "total": -1, "at": 0.0}
+
+    def _report() -> None:
+        with lock:
+            done = max((n for n, _ in bars.values()), default=0)
+            total = max((t for _, t in bars.values()), default=0)
+            if done == last["done"] and total == last["total"]:
+                return
+            now = time.monotonic()
+            if done < total and now - last["at"] < 0.1 and abs(done - last["done"]) < 131072:
+                return
+            last["done"], last["total"], last["at"] = done, total, now
+            try:
+                progress(done, total)
+            except DownloadCancelled:
+                raise
+            except Exception:  # noqa: BLE001 - a UI callback must never break a download
+                pass
+
+    class _ProgressTqdm(_tqdm):
+        def __init__(self, *args, **kwargs):  # noqa: ANN002, ANN003
+            kwargs["file"] = _DEVNULL
+            kwargs["disable"] = False
+            kwargs["mininterval"] = 0.5
+            kwargs["miniters"] = 1 << 20
+            super().__init__(*args, **kwargs)
+            self._track()
+
+        def _track(self) -> None:
+            if self.unit != "B":
+                return
+            with lock:
+                bars[id(self)] = (int(self.n or 0), int(self.total or 0))
+            _report()
+
+        def update(self, n: int = 1):  # noqa: ANN201
+            result = super().update(n)
+            self._track()
+            return result
+
+        def close(self) -> None:
+            # ``close`` also runs from ``tqdm.__del__``: never let a cancellation
+            # (or a UI callback error) escape while the GC is collecting.
+            try:
+                if self.unit == "B":
+                    with lock:
+                        total = int(self.total or 0)
+                        bars[id(self)] = (total or int(self.n or 0), total)
+                    _report()
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                super().close()
+            except Exception:  # noqa: BLE001
+                pass
+
+    return _ProgressTqdm
 
 LANGUAGE_NAMES: dict[str, str] = {
     "en": "English",
@@ -395,30 +497,41 @@ def custom_translation_info(path: str | Path) -> ModelInfo:
 
 
 # -- downloads (blocking; run these off the GUI thread) ------------------------
-def download_whisper(name: str, models_dir: Path, force: bool = False) -> None:
+def download_whisper(
+    name: str, models_dir: Path, force: bool = False, progress: ProgressFn | None = None
+) -> None:
     import shutil
+
+    from huggingface_hub import snapshot_download
 
     if force:
         shutil.rmtree(whisper_cache_dir(models_dir, name), ignore_errors=True)
-    from faster_whisper.utils import download_model
+    snapshot_download(
+        repo_id=WHISPER_REPOS.get(name, name),
+        cache_dir=str(models_dir),
+        allow_patterns=WHISPER_ALLOW_PATTERNS,
+        tqdm_class=progress_tqdm_class(progress) if progress is not None else None,
+    )
 
-    download_model(name, cache_dir=str(models_dir))
+
+def download_quickmt(models_dir: Path, progress: ProgressFn | None = None) -> None:
+    download_translation(DEFAULT_TRANSLATION_KEY, models_dir, progress=progress)
 
 
-def download_quickmt(models_dir: Path) -> None:
-    download_translation(DEFAULT_TRANSLATION_KEY, models_dir)
-
-
-def download_translation(key: str, models_dir: Path, force: bool = False) -> None:
+def download_translation(
+    key: str, models_dir: Path, force: bool = False, progress: ProgressFn | None = None
+) -> None:
     if force:
-        force_download_translation(key, models_dir)
+        force_download_translation(key, models_dir, progress=progress)
         return
     from .translator import Translator
 
-    Translator._ensure_model(Path(models_dir), key)
+    Translator._ensure_model(Path(models_dir), key, progress=progress)
 
 
-def force_download_translation(key: str, models_dir: Path) -> None:
+def force_download_translation(
+    key: str, models_dir: Path, progress: ProgressFn | None = None
+) -> None:
     """Re-fetch a translation model from scratch (repair / integrity reset)."""
     from huggingface_hub import snapshot_download
 
@@ -431,14 +544,20 @@ def force_download_translation(key: str, models_dir: Path) -> None:
         local_dir=str(model_dir),
         ignore_patterns=QUICKMT_IGNORE,
         force_download=True,
+        tqdm_class=progress_tqdm_class(progress) if progress is not None else None,
     )
 
 
-def download_model_info(info: ModelInfo, models_dir: Path, force: bool = False) -> None:
+def download_model_info(
+    info: ModelInfo,
+    models_dir: Path,
+    force: bool = False,
+    progress: ProgressFn | None = None,
+) -> None:
     if info.kind == "whisper":
-        download_whisper(info.key, models_dir, force=force)
+        download_whisper(info.key, models_dir, force=force, progress=progress)
     else:
-        download_translation(info.key, models_dir, force=force)
+        download_translation(info.key, models_dir, force=force, progress=progress)
 
 
 # -- disk usage / deletion -----------------------------------------------------

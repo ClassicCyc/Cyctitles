@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import logging
+import threading
 import time
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QThread, QTimer, Signal
+from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -14,12 +16,15 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QProgressBar,
+    QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
 from ..i18n import tr
-from ..models import ModelInfo, directory_size, download_model_info, human_size
+from ..models import DownloadCancelled, ModelInfo, download_model_info, human_size
+
+log = logging.getLogger("cyctitles.download")
 
 
 class MissingModelsDialog(QDialog):
@@ -75,10 +80,20 @@ class MissingModelsDialog(QDialog):
         return box
 
 
-class ModelDownloadWorker(QThread):
+class _DownloadSignals(QObject):
     progress = Signal(str)
+    bytes_progress = Signal(int, int)
     failed = Signal(str)
     finished_ok = Signal()
+
+
+class ModelDownloadWorker:
+    """Downloads models on a **daemon** thread.
+
+    A daemon thread (unlike a QThread) never keeps the process alive, so a
+    stalled network download can no longer leave a zombie Cyctitles process
+    behind after the window is closed.
+    """
 
     def __init__(
         self,
@@ -87,23 +102,87 @@ class ModelDownloadWorker(QThread):
         parent: QWidget | None = None,
         force: bool = False,
     ) -> None:
-        super().__init__(parent)
         self._infos = infos
-        self._models_dir = models_dir
+        self._models_dir = Path(models_dir)
         self._force = force
+        self._cancelled = False
+        self._thread: threading.Thread | None = None
+        self._last_emit = 0.0
+        self._last_done = -1
+        self.signals = _DownloadSignals()
 
-    def run(self) -> None:  # noqa: D102
+    def cancel(self) -> None:
+        self._cancelled = True
+
+    def _emit_bytes(self, done: int, total: int) -> None:
+        """Forward byte progress to the GUI, throttled to avoid signal flooding."""
+        now = time.monotonic()
+        if (
+            done < total
+            and now - self._last_emit < 0.1
+            and abs(done - self._last_done) < 131072
+        ):
+            return
+        self._last_emit = now
+        self._last_done = done
+        self.signals.bytes_progress.emit(max(0, int(done)), max(0, int(total)))
+
+    def start(self) -> None:
+        self._thread = threading.Thread(
+            target=self._run, daemon=True, name="cyctitles-download"
+        )
+        self._thread.start()
+
+    def wait(self, timeout_ms: int = 0) -> bool:
+        if self._thread is None:
+            return True
+        self._thread.join(timeout_ms / 1000.0 if timeout_ms else None)
+        return not self._thread.is_alive()
+
+    def _run(self) -> None:
         try:
+            base = 0
+            grand_total = sum(max(int(i.size_bytes or 0), 0) for i in self._infos) or 1
             for info in self._infos:
-                self.progress.emit(info.label)
-                download_model_info(info, self._models_dir, force=self._force)
-            self.finished_ok.emit()
+                if self._cancelled:
+                    log.info("Download cancelled by user")
+                    return
+                log.info("Downloading %s from %s -> %s", info.label, info.repo_id, info.directory)
+                self.signals.progress.emit(info.label)
+                current = {"total": int(info.size_bytes or 0)}
+
+                def report(
+                    done: int,
+                    total: int,
+                    _base: int = base,
+                    _cur: dict = current,
+                    _grand: int = grand_total,
+                ) -> None:
+                    if self._cancelled:
+                        raise DownloadCancelled
+                    # HF briefly reports a tiny total while probing small files;
+                    # keep the expected model size as a lower bound so the bar
+                    # never jumps to 100% and back.
+                    if total > int(_cur["total"]):
+                        _cur["total"] = int(total)
+                    self._emit_bytes(_base + int(done), _grand)
+
+                download_model_info(
+                    info, self._models_dir, force=self._force, progress=report
+                )
+                base += current["total"]
+                self._emit_bytes(base, grand_total)
+                log.info("Downloaded %s", info.label)
+            self.signals.finished_ok.emit()
+        except DownloadCancelled:
+            log.info("Download cancelled by user")
         except Exception as exc:  # noqa: BLE001
-            self.failed.emit(str(exc))
+            log.exception("Download failed: %s", exc)
+            self.signals.failed.emit(str(exc))
 
 
 class _DownloadDialog(QDialog):
-    """Modal, non-cancellable dialog with a live progress bar."""
+    """Modal dialog with a live progress bar and a Cancel button."""
 
     def __init__(self, total_bytes: int, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -111,7 +190,11 @@ class _DownloadDialog(QDialog):
         self.setWindowModality(Qt.WindowModality.WindowModal)
         self.setMinimumWidth(480)
         self._total = max(1, total_bytes)
+        self._last_bytes = 0
+        self._last_time = time.monotonic()
+        self._speed = 0.0
         self._allow_close = False
+        self.was_cancelled = False
 
         layout = QVBoxLayout(self)
         layout.setSpacing(8)
@@ -129,23 +212,39 @@ class _DownloadDialog(QDialog):
         self.detail_label.setStyleSheet("color: gray; font-size: 11px;")
         layout.addWidget(self.detail_label)
 
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
+        self.cancel_button = QPushButton(tr("btn_cancel"))
+        self.cancel_button.clicked.connect(self._on_cancel)
+        buttons.addWidget(self.cancel_button)
+        layout.addLayout(buttons)
+
     def set_file(self, label: str) -> None:
         self.file_label.setText(tr("dl_downloading_file", label=label))
 
-    def set_busy(self) -> None:
-        """Show an indeterminate bar (used for repair/force re-downloads)."""
-        self.bar.setRange(0, 0)
-
-    def set_progress(self, downloaded: int, speed: float, eta: float | None) -> None:
-        fraction = min(0.99, downloaded / self._total)
+    def set_bytes(self, done: int, total: int) -> None:
+        if total > 0:
+            self._total = total
+        now = time.monotonic()
+        elapsed = now - self._last_time
+        if elapsed >= 0.25:
+            self._speed = max(0.0, (done - self._last_bytes) / elapsed)
+            self._last_bytes = done
+            self._last_time = now
+        fraction = min(1.0, done / self._total) if self._total > 0 else 0.0
+        if done < self._total:
+            fraction = min(fraction, 0.99)
+        self.bar.setRange(0, 100)
         self.bar.setValue(int(fraction * 100))
+        remaining = max(0, self._total - done)
+        eta = remaining / self._speed if self._speed > 1 else None
         parts = [
-            f"{human_size(downloaded)} / {human_size(self._total)}",
+            f"{human_size(done)} / {human_size(self._total)}",
             f"{fraction * 100:.0f}%",
         ]
-        if speed > 1:
-            parts.append(f"{human_size(int(speed))}/s")
-        if eta is not None and eta > 0 and speed > 1:
+        if self._speed > 1:
+            parts.append(f"{human_size(int(self._speed))}/s")
+        if eta is not None and eta > 0:
             parts.append(tr("dl_eta_left", eta=_format_eta(eta)))
         self.detail_label.setText("  ·  ".join(parts))
 
@@ -156,8 +255,14 @@ class _DownloadDialog(QDialog):
         self._allow_close = True
         self.close()
 
+    def _on_cancel(self) -> None:
+        self.was_cancelled = True
+        self._allow_close = True
+        self.close()
+
     def keyPressEvent(self, event) -> None:  # noqa: N802, ANN001
         if event.key() == Qt.Key.Key_Escape:
+            self._on_cancel()
             return
         super().keyPressEvent(event)
 
@@ -165,6 +270,7 @@ class _DownloadDialog(QDialog):
         if self._allow_close:
             super().closeEvent(event)
         else:
+            self._on_cancel()
             event.ignore()
 
 
@@ -190,48 +296,31 @@ def run_download(
         return True, ""
 
     total_bytes = sum(max(info.size_bytes, 0) for info in infos) or 1
-    directories = [Path(info.directory) for info in infos]
-    baseline = sum(directory_size(d) for d in directories)
 
     progress = _DownloadDialog(total_bytes, parent)
-    if force:
-        progress.set_busy()
-    state = {"ok": False, "error": "", "last_bytes": 0, "last_time": time.monotonic()}
+    state = {"ok": False, "error": ""}
 
     worker = ModelDownloadWorker(infos, models_dir, parent, force=force)
 
-    timer = QTimer(progress)
-    timer.setInterval(300)
-
-    def tick() -> None:
-        now = time.monotonic()
-        downloaded = max(0, sum(directory_size(d) for d in directories) - baseline)
-        elapsed = max(1e-3, now - state["last_time"])
-        speed = max(0.0, (downloaded - state["last_bytes"]) / elapsed)
-        state["last_bytes"] = downloaded
-        state["last_time"] = now
-        remaining = total_bytes - downloaded
-        eta = remaining / speed if speed > 1 else None
-        progress.set_progress(downloaded, speed, eta)
-
-    timer.timeout.connect(tick)
-
     def _ok() -> None:
-        timer.stop()
         state["ok"] = True
         progress.finish()
 
     def _err(message: str) -> None:
-        timer.stop()
         state["error"] = message
         progress.finish()
 
-    worker.progress.connect(progress.set_file)
-    worker.finished_ok.connect(_ok)
-    worker.failed.connect(_err)
-    timer.start()
+    worker.signals.progress.connect(progress.set_file)
+    worker.signals.bytes_progress.connect(progress.set_bytes)
+    worker.signals.finished_ok.connect(_ok)
+    worker.signals.failed.connect(_err)
     worker.start()
     progress.exec()
-    worker.wait(5000)
-    timer.stop()
+
+    # The dialog is gone. If the user cancelled, ask the worker to stop (the
+    # thread is a daemon, so it can never keep the process alive either way).
+    if progress.was_cancelled:
+        worker.cancel()
+    else:
+        worker.wait(5000)
     return state["ok"], state["error"]

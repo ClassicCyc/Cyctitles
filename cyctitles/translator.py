@@ -13,7 +13,9 @@ from .models import (
     DEFAULT_TRANSLATION_KEY,
     QUICKMT_IGNORE,
     TRANSLATION_BY_KEY,
+    ProgressFn,
     is_translation_downloaded,
+    progress_tqdm_class,
     translation_model_dir,
 )
 
@@ -137,7 +139,12 @@ class Translator:
         raise RuntimeError(f"Could not repair translation model '{model_key}': {last}")
 
     @classmethod
-    def _ensure_model(cls, models_dir: Path, model_key: str = DEFAULT_TRANSLATION_KEY) -> Path:
+    def _ensure_model(
+        cls,
+        models_dir: Path,
+        model_key: str = DEFAULT_TRANSLATION_KEY,
+        progress: ProgressFn | None = None,
+    ) -> Path:
         from huggingface_hub import snapshot_download
 
         spec = TRANSLATION_BY_KEY.get(model_key)
@@ -151,6 +158,7 @@ class Translator:
                 repo_id=spec.repo_id,
                 local_dir=str(model_dir),
                 ignore_patterns=QUICKMT_IGNORE,
+                tqdm_class=progress_tqdm_class(progress) if progress is not None else None,
             )
         return model_dir
 
